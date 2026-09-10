@@ -155,7 +155,7 @@
       <aside class="panel character-panel">
         <div class="panel-head">
           <h2>1. 멤버 고르기</h2>
-          <p>몇 명이든 추가할 수 있습니다. 같은 캐릭터는 한 번만 추가됩니다.</p>
+          <p>몇 명이든 추가할 수 있습니다. 같은 캐릭터도 여러 번 추가할 수 있어요.</p>
         </div>
         <div class="search-wrap"><input class="search" id="search" placeholder="이름 검색 (예: 레이, 이즈미, 린네)" /></div>
         <div class="filter-row" id="filters"></div>
@@ -261,6 +261,8 @@
     let restoringHistory = false;
     let wheelHistoryReady = true;
     let wheelHistoryTimer = null;
+    let uidCounter = 0;
+    function makeUid(id="member"){ return `${id}-${Date.now().toString(36)}-${(++uidCounter).toString(36)}`; }
 
     function historySnapshot(){
       return JSON.stringify({title:state.title,concept:state.concept,bg:state.bg,members:state.members,selectedId:state.selectedId,selectedIds:state.selectedIds});
@@ -277,9 +279,10 @@
         restoringHistory=true;
         const d=JSON.parse(snap);
         state.title=d.title||""; state.concept=d.concept||""; state.bg=d.bg||"#f8f5ff";
-        state.members=(d.members||[]).filter(m=>byId[m.id]).map(m=>({...m}));
-        state.selectedId=d.selectedId&&byId[d.selectedId]?d.selectedId:(state.members.at(-1)?.id||null);
-        state.selectedIds=(d.selectedIds||[]).filter(id=>byId[id]&&state.members.some(m=>m.id===id));
+        state.members=(d.members||[]).filter(m=>byId[m.id]).map(m=>({...m,uid:m.uid||makeUid(m.id)}));
+        const selectedMember=state.members.find(m=>m.uid===d.selectedId)||state.members.find(m=>m.id===d.selectedId)||state.members.at(-1)||null;
+        state.selectedId=selectedMember?.uid||null;
+        state.selectedIds=[...new Set((d.selectedIds||[]).map(sel=>(state.members.find(m=>m.uid===sel)||state.members.find(m=>m.id===sel))?.uid).filter(Boolean))];
         if(!state.selectedIds.length&&state.selectedId)state.selectedIds=[state.selectedId];
         unitName.value=state.title; concept.value=state.concept; bgColor.value=state.bg;
         renderAll();
@@ -304,7 +307,7 @@
 
     function notify(msg){ clearTimeout(toastTimer); toast.textContent=msg; toast.classList.add("show"); toastTimer=setTimeout(()=>toast.classList.remove("show"),1800); }
     function isAdded(id){ return state.members.some(m=>m.id===id); }
-    function getMember(id){ return state.members.find(m=>m.id===id); }
+    function getMember(uid){ return state.members.find(m=>m.uid===uid); }
     function getSelected(){ return getMember(state.selectedId); }
     function imageSrc(id){ return state.customImages.get(id) || EMBEDDED_IMAGES[id] || `assets/characters/${id}.png`; }
     function safeText(v,fallback){ return (v||"").trim() || fallback; }
@@ -343,23 +346,22 @@
     }
 
     function toggleCharacter(id){
-      if(isAdded(id)){ state.selectedId=id; state.selectedIds=[id]; renderInspector(); renderStage(); notify("이미 추가된 멤버예요. 오른쪽에서 수정할 수 있어요."); return; }
       pushHistory();
-      const i=state.members.length;
-      state.members.push({id,x:.5+((i%3)-1)*.14,y:.49+((Math.floor(i/3)%3)-1)*.11,scale:DEFAULT_SCALE,z:i+1,center:false});
-      state.selectedId=id;
-      state.selectedIds=[id];
+      const i=state.members.length, uid=makeUid(id);
+      state.members.push({uid,id,x:.5+((i%3)-1)*.14,y:.49+((Math.floor(i/3)%3)-1)*.11,scale:DEFAULT_SCALE,z:i+1,center:false});
+      state.selectedId=uid;
+      state.selectedIds=[uid];
       if(state.members.length===1) state.members[0].center=true;
       renderAll();
     }
 
-    function removeMember(id){
-      const idx=state.members.findIndex(m=>m.id===id); if(idx<0)return;
+    function removeMember(uid){
+      const idx=state.members.findIndex(m=>m.uid===uid); if(idx<0)return;
       pushHistory();
       const wasCenter=state.members[idx].center; state.members.splice(idx,1);
       if(wasCenter && state.members[0]) state.members[0].center=true;
-      state.selectedIds=state.selectedIds.filter(x=>x!==id);
-      state.selectedId=state.selectedIds.at(-1)||state.members.at(-1)?.id||null;
+      state.selectedIds=state.selectedIds.filter(x=>x!==uid);
+      state.selectedId=state.selectedIds.at(-1)||state.members.at(-1)?.uid||null;
       if(state.selectedId&&!state.selectedIds.length)state.selectedIds=[state.selectedId]; normalizeZ(); renderAll();
     }
     function normalizeZ(){ [...state.members].sort((a,b)=>a.z-b.z).forEach((m,i)=>m.z=i+1); }
@@ -374,7 +376,7 @@
       $("#stageEmpty").style.display=state.members.length?"none":"flex";
       state.members.slice().sort((a,b)=>a.z-b.z).forEach(m=>{
         const c=byId[m.id]; if(!c)return;
-        const el=document.createElement("div"); el.className="actor"+(state.selectedIds.includes(m.id)?" selected":""); el.dataset.id=m.id;
+        const el=document.createElement("div"); el.className="actor"+(state.selectedIds.includes(m.uid)?" selected":""); el.dataset.uid=m.uid; el.dataset.id=m.id;
         el.style.left=(m.x*100)+"%"; el.style.top=(m.y*100)+"%"; el.style.setProperty("--scale",m.scale); el.style.zIndex=10+m.z; el.style.setProperty("--unit-color",c.color);
         el.innerHTML=`<div class="actor-card"><div class="actor-image-wrap"><img class="actor-image" alt="${c.name}" draggable="false"></div></div><div class="actor-label">${shortName(c)}</div>${m.center?'<div class="center-star">★</div>':''}`;
         const img=el.querySelector(".actor-image"); img.src=imageSrc(c.id); img.onload=()=>{img.style.display="block"}; img.onerror=()=>{img.style.display="none"};
@@ -390,28 +392,28 @@
         if(e.button!==undefined && e.button!==0)return;
         e.preventDefault();
         const multi=e.ctrlKey||e.metaKey||e.shiftKey;
-        const already=state.selectedIds.includes(m.id);
+        const already=state.selectedIds.includes(m.uid);
         if(multi){
           if(already){
-            state.selectedIds=state.selectedIds.filter(id=>id!==m.id);
-            if(state.selectedId===m.id)state.selectedId=state.selectedIds.at(-1)||null;
+            state.selectedIds=state.selectedIds.filter(uid=>uid!==m.uid);
+            if(state.selectedId===m.uid)state.selectedId=state.selectedIds.at(-1)||null;
             renderInspector(); renderStage();
             return;
           }else{
-            state.selectedIds=[...state.selectedIds,m.id];
-            state.selectedId=m.id;
+            state.selectedIds=[...state.selectedIds,m.uid];
+            state.selectedId=m.uid;
           }
         }else if(!already){
-          state.selectedIds=[m.id];
-          state.selectedId=m.id;
+          state.selectedIds=[m.uid];
+          state.selectedId=m.uid;
         }else{
-          state.selectedId=m.id;
+          state.selectedId=m.uid;
         }
         renderInspector();
-        $$(".actor").forEach(a=>a.classList.toggle("selected",state.selectedIds.includes(a.dataset.id)));
+        $$(".actor").forEach(a=>a.classList.toggle("selected",state.selectedIds.includes(a.dataset.uid)));
         el.setPointerCapture(e.pointerId);
         const r=stage.getBoundingClientRect();
-        const ids=state.selectedIds.length?state.selectedIds:[m.id];
+        const ids=state.selectedIds.length?state.selectedIds:[m.uid];
         const starts=ids.map(id=>{const member=getMember(id);return member?{id,x:member.x,y:member.y}:null}).filter(Boolean);
         start={px:e.clientX,py:e.clientY,w:r.width,h:r.height,starts,historySaved:false};
       });
@@ -426,7 +428,7 @@
         start.starts.forEach(s=>{
           const member=getMember(s.id); if(!member)return;
           member.x=s.x+dx; member.y=s.y+dy;
-          const node=document.querySelector(`.actor[data-id="${s.id}"]`);
+          const node=document.querySelector(`.actor[data-uid="${s.id}"]`);
           if(node){node.style.left=(member.x*100)+"%";node.style.top=(member.y*100)+"%";}
         });
       });
@@ -468,11 +470,11 @@
         $$(".actor").forEach(a=>{
           const ar=a.getBoundingClientRect();
           const al=ar.left-sel.r.left,at=ar.top-sel.r.top,aright=ar.right-sel.r.left,ab=ar.bottom-sel.r.top;
-          if(aright>=rect.left&&al<=rect.right&&ab>=rect.top&&at<=rect.bottom)hits.push(a.dataset.id);
+          if(aright>=rect.left&&al<=rect.right&&ab>=rect.top&&at<=rect.bottom)hits.push(a.dataset.uid);
         });
         state.selectedIds=[...new Set([...(sel.base||[]),...hits])];
         state.selectedId=state.selectedIds.at(-1)||null;
-        $$(".actor").forEach(a=>a.classList.toggle("selected",state.selectedIds.includes(a.dataset.id)));
+        $$(".actor").forEach(a=>a.classList.toggle("selected",state.selectedIds.includes(a.dataset.uid)));
       });
       const finish=()=>{
         if(!sel)return;
@@ -498,11 +500,11 @@
         </div>`;
       const img=inspector.querySelector(".avatar img"); img.src=imageSrc(c.id); img.onload=()=>{img.style.display="block"}; img.onerror=()=>{img.style.display="none"};
       $("#scaleRange").addEventListener("pointerdown",pushHistory,{once:true});
-      $("#scaleRange").oninput=e=>{m.scale=Number(e.target.value)/100;$("#scaleValue").textContent=e.target.value+"%";const a=document.querySelector(`.actor[data-id="${m.id}"]`);if(a)a.style.setProperty("--scale",m.scale)};
+      $("#scaleRange").oninput=e=>{m.scale=Number(e.target.value)/100;$("#scaleValue").textContent=e.target.value+"%";const a=document.querySelector(`.actor[data-uid="${m.uid}"]`);if(a)a.style.setProperty("--scale",m.scale)};
       $("#frontBtn").onclick=()=>{pushHistory();m.z=Math.max(0,...state.members.map(x=>x.z))+1;normalizeZ();renderStage();renderInspector()};
       $("#backBtn").onclick=()=>{pushHistory();m.z=Math.min(0,...state.members.map(x=>x.z))-1;normalizeZ();renderStage();renderInspector()};
       $("#centerBtn").onclick=()=>{pushHistory();if(m.center){m.center=false}else{state.members.forEach(x=>x.center=false);m.center=true}renderStage();renderInspector()};
-      $("#removeBtn").onclick=()=>removeMember(m.id);
+      $("#removeBtn").onclick=()=>removeMember(m.uid);
     }
 
     function suggestedScale(n){
@@ -582,7 +584,7 @@
     function mixHex(a,b,t){const pa=parseInt(a.slice(1),16),pb=parseInt(b.slice(1),16);const ar=pa>>16,ag=(pa>>8)&255,ab=pa&255,br=pb>>16,bg=(pb>>8)&255,bb=pb&255;const r=Math.round(ar+(br-ar)*t),g=Math.round(ag+(bg-ag)*t),bl=Math.round(ab+(bb-ab)*t);return `rgb(${r},${g},${bl})`}
     function slugify(s){return s.toLowerCase().trim().replace(/[^a-z0-9가-힣]+/g,"-").replace(/^-+|-+$/g,"")}
 
-    function statePayload(){return {v:1,title:state.title,concept:state.concept,bg:state.bg,members:state.members.map(({id,x,y,scale,z,center})=>({id,x:+x.toFixed(4),y:+y.toFixed(4),scale:+scale.toFixed(3),z,center}))}}
+    function statePayload(){return {v:2,title:state.title,concept:state.concept,bg:state.bg,members:state.members.map(({uid,id,x,y,scale,z,center})=>({uid,id,x:+x.toFixed(4),y:+y.toFixed(4),scale:+scale.toFixed(3),z,center}))}}
     function encodeState(obj){const bytes=new TextEncoder().encode(JSON.stringify(obj));let s="";bytes.forEach(b=>s+=String.fromCharCode(b));return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"")}
     function decodeState(s){s=s.replace(/-/g,"+").replace(/_/g,"/");while(s.length%4)s+="=";const bin=atob(s),bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));return JSON.parse(new TextDecoder().decode(bytes))}
     async function share(){
@@ -593,7 +595,7 @@
     }
     function loadFromHash(){
       const m=location.hash.match(/^#s=(.+)$/);if(!m)return;
-      try{const d=decodeState(m[1]);state.title=d.title||"";state.concept=d.concept||"";state.bg=/^#[0-9a-f]{6}$/i.test(d.bg||"")?d.bg:"#f8f5ff";state.members=(d.members||[]).filter(x=>byId[x.id]).map((x,i)=>({id:x.id,x:clamp(Number(x.x)||.5,.05,.95),y:clamp(Number(x.y)||.5,.12,.85),scale:clamp(Number(x.scale)||DEFAULT_SCALE,.35,1.6),z:Number(x.z)||i+1,center:!!x.center}));if(state.members.filter(x=>x.center).length>1){let first=true;state.members.forEach(x=>{if(x.center&&first){first=false}else if(x.center)x.center=false})}state.selectedId=state.members[0]?.id||null;state.selectedIds=state.selectedId?[state.selectedId]:[];unitName.value=state.title;concept.value=state.concept;bgColor.value=state.bg;notify("공유된 셔플 조합을 불러왔어요.")}catch(e){console.warn(e);notify("공유 링크를 읽지 못했어요.")}
+      try{const d=decodeState(m[1]);state.title=d.title||"";state.concept=d.concept||"";state.bg=/^#[0-9a-f]{6}$/i.test(d.bg||"")?d.bg:"#f8f5ff";state.members=(d.members||[]).filter(x=>byId[x.id]).map((x,i)=>({uid:x.uid||makeUid(x.id),id:x.id,x:clamp(Number(x.x)||.5,.05,.95),y:clamp(Number(x.y)||.5,.12,.85),scale:clamp(Number(x.scale)||DEFAULT_SCALE,.35,1.6),z:Number(x.z)||i+1,center:!!x.center}));if(state.members.filter(x=>x.center).length>1){let first=true;state.members.forEach(x=>{if(x.center&&first){first=false}else if(x.center)x.center=false})}state.selectedId=state.members[0]?.uid||null;state.selectedIds=state.selectedId?[state.selectedId]:[];unitName.value=state.title;concept.value=state.concept;bgColor.value=state.bg;notify("공유된 셔플 조합을 불러왔어요.")}catch(e){console.warn(e);notify("공유 링크를 읽지 못했어요.")}
     }
 
     function setupAssetModal(){
